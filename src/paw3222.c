@@ -77,6 +77,7 @@ struct paw32xx_config {
 
 struct paw32xx_data {
     const struct device *dev;
+    struct k_mutex lock;
     struct k_work motion_work;
     struct gpio_callback motion_cb;
     struct k_timer motion_timer; // Add timer for delayed motion checking
@@ -249,7 +250,7 @@ static void paw32xx_motion_timer_handler(struct k_timer *timer) {
     k_work_submit(&data->motion_work);
 }
 
-static void paw32xx_motion_work_handler(struct k_work *work) {
+static void paw32xx_motion_work_handler_locked(struct k_work *work) {
     struct paw32xx_data *data = CONTAINER_OF(work, struct paw32xx_data, motion_work);
     const struct device *dev = data->dev;
     const struct paw32xx_config *cfg = dev->config;
@@ -285,6 +286,14 @@ static void paw32xx_motion_work_handler(struct k_work *work) {
     k_timer_start(&data->motion_timer, K_MSEC(15), K_NO_WAIT);
 }
 
+/* Serialize SPI sequences against runtime settings and power transitions. */
+static void paw32xx_motion_work_handler(struct k_work *work) {
+    struct paw32xx_data *data = CONTAINER_OF(work, struct paw32xx_data, motion_work);
+    k_mutex_lock(&data->lock, K_FOREVER);
+    paw32xx_motion_work_handler_locked(work);
+    k_mutex_unlock(&data->lock);
+}
+
 static void paw32xx_motion_handler(const struct device *gpio_dev, struct gpio_callback *cb,
                                    uint32_t pins) {
     struct paw32xx_data *data = CONTAINER_OF(cb, struct paw32xx_data, motion_cb);
@@ -303,7 +312,7 @@ static void paw32xx_motion_handler(const struct device *gpio_dev, struct gpio_ca
     k_work_submit(&data->motion_work);
 }
 
-int paw32xx_set_resolution(const struct device *dev, uint16_t res_cpi) {
+static int paw32xx_set_resolution_locked(const struct device *dev, uint16_t res_cpi) {
     uint8_t val;
     int ret;
 
@@ -337,7 +346,7 @@ int paw32xx_set_resolution(const struct device *dev, uint16_t res_cpi) {
     return 0;
 }
 
-int paw32xx_force_awake(const struct device *dev, bool enable) {
+static int paw32xx_force_awake_locked(const struct device *dev, bool enable) {
     uint8_t val = enable ? 0 : OPERATION_MODE_SLP_MASK;
     int ret;
 
@@ -357,6 +366,25 @@ int paw32xx_force_awake(const struct device *dev, bool enable) {
     }
 
     return 0;
+}
+
+int paw32xx_set_resolution(const struct device *dev, uint16_t res_cpi) {
+    struct paw32xx_data *data = dev->data;
+    k_mutex_lock(&data->lock, K_FOREVER);
+    int ret = paw32xx_set_resolution_locked(dev, res_cpi);
+    /* Also restore write protection when a preceding register write failed. */
+    int protect_ret = paw32xx_write_reg(dev, PAW32XX_WRITE_PROTECT, WRITE_PROTECT_ENABLE);
+    k_mutex_unlock(&data->lock);
+    return ret < 0 ? ret : protect_ret;
+}
+
+int paw32xx_force_awake(const struct device *dev, bool enable) {
+    struct paw32xx_data *data = dev->data;
+    k_mutex_lock(&data->lock, K_FOREVER);
+    int ret = paw32xx_force_awake_locked(dev, enable);
+    int protect_ret = paw32xx_write_reg(dev, PAW32XX_WRITE_PROTECT, WRITE_PROTECT_ENABLE);
+    k_mutex_unlock(&data->lock);
+    return ret < 0 ? ret : protect_ret;
 }
 
 static int paw32xx_configure(const struct device *dev) {
@@ -414,10 +442,12 @@ static int paw32xx_configure(const struct device *dev) {
     k_sleep(K_MSEC(RESET_DELAY_MS));
 
     if (cfg->res_cpi > 0) {
-        paw32xx_set_resolution(dev, cfg->res_cpi);
+        ret = paw32xx_set_resolution(dev, cfg->res_cpi);
+        if (ret < 0) { return ret; }
     }
 
-    paw32xx_force_awake(dev, cfg->force_awake);
+    ret = paw32xx_force_awake(dev, cfg->force_awake);
+    if (ret < 0) { return ret; }
 
     // Dummy reads to clear any residual data
     paw32xx_read_reg(dev, PAW32XX_MOTION, &val);
@@ -439,6 +469,7 @@ static int paw32xx_init(const struct device *dev) {
     }
 
     data->dev = dev;
+    k_mutex_init(&data->lock);
 
     k_work_init(&data->motion_work, paw32xx_motion_work_handler);
     // Initialize the timer for delayed motion checks
@@ -523,7 +554,7 @@ static int paw32xx_init(const struct device *dev) {
 }
 
 #ifdef CONFIG_PM_DEVICE
-static int paw32xx_pm_action(const struct device *dev, enum pm_device_action action) {
+static int paw32xx_pm_action_locked(const struct device *dev, enum pm_device_action action) {
     const struct paw32xx_config *cfg = dev->config;
     int ret;
     uint8_t val;
@@ -580,6 +611,13 @@ static int paw32xx_pm_action(const struct device *dev, enum pm_device_action act
     }
 
     return 0;
+}
+static int paw32xx_pm_action(const struct device *dev, enum pm_device_action action) {
+    struct paw32xx_data *data = dev->data;
+    k_mutex_lock(&data->lock, K_FOREVER);
+    int ret = paw32xx_pm_action_locked(dev, action);
+    k_mutex_unlock(&data->lock);
+    return ret;
 }
 #endif
 

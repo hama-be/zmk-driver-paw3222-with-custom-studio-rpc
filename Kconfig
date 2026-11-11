@@ -4,3 +4,13 @@ menuconfig PAW3222
   select SPI
     help
       Enable PAW3222 mouse optical sensor.
+
+
+config ZMK_PAW3222_CUSTOM_SETTINGS
+    bool "PAW3222 settings in DYA Studio"
+    depends on PAW3222 && ZMK_STUDIO
+    select ZMK_CUSTOM_SETTINGS
+    select ZMK_CUSTOM_SETTINGS_STUDIO_RPC
+    help
+      Publish CPI and force-awake via the shared custom-settings RPC.
+      Requires the cormoran ZMK fork and zmk-feature-custom-settings.

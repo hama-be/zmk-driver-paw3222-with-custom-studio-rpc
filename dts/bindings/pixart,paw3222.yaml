@@ -33,3 +33,6 @@ properties:
       Initialize the sensor in "force awake" mode. This can also be enabled or
       disabled in runtime by the application using the paw32xx_force_awake()
       API.
+  settings-id:
+    type: string
+    description: Stable, unique identifier for this sensor in Studio settings.

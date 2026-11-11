@@ -1,3 +1,53 @@
+# PAW3222 with DYA Studio settings (prototype)
+
+Based on [sekigon-gonnoc/zmk-driver-paw3222](https://github.com/sekigon-gonnoc/zmk-driver-paw3222).
+Existing driver license and attribution are retained. This extension publishes
+sensor settings via cormoran's shared custom-settings RPC, under the separate
+`cormoran__paw3222` identity. It does not emulate the PMW3610 protocol.
+
+## Enable
+
+Use the cormoran ZMK fork with custom Studio RPC and add
+`cormoran/zmk-feature-custom-settings` plus this module to west.yml.
+Do not also load the original PAW3222 module (same driver and DT compatible).
+
+```conf
+CONFIG_PAW3222=y
+CONFIG_ZMK_STUDIO=y
+CONFIG_ZMK_STUDIO_LOCKING=y
+CONFIG_ZMK_PAW3222_CUSTOM_SETTINGS=y
+```
+
+Keep your SPI wiring and `compatible = "pixart,paw3222"`. Add a unique,
+stable `settings-id = "trackball"` to each sensor node, and set
+`res-cpi = <608>` for the default. Without an id, the node name is used.
+Bind `&studio_unlock` in your keymap to authorize Studio writes.
+
+## Operate
+
+In the accompanying DYA Studio branch, open Trackball → Sensor Drivers →
+`cormoran__paw3222`. The stock Studio also lists these keys in Settings →
+Advanced Settings. Edit `cpi@trackball` or `force_awake@trackball`, wait for the
+memory write, then select **Save** to retain changes across reboots.
+**Discard** restores the saved values; **Reset** restores firmware defaults.
+
+CPI range is 608–4826. The chip uses 38-CPI steps; values are rounded down
+by the upstream API. The accompanying UI submits whole steps. Other clients
+can submit intermediate values: the saved requested CPI may then differ from
+the hardware's rounded-down CPI. Force awake disables the driver's sensor
+sleep bits and can increase battery use. Input rotation, sensitivity scaling,
+and scroll behavior remain in the separate runtime input processors.
+
+This is a hardware-validation prototype. Settings readback reflects the
+requested value, not a verified sensor register read. SPI apply failures are
+logged; the GUI is not proof that hardware accepted a write. It has no raw
+register, frame capture, or PMW3610-specific power timing controls. Only local
+sensors on the Studio central are supported (no PAW-specific peripheral RPC).
+
+The existing driver documentation follows below.
+
+---
+
 # ZMK PAW3222 Driver
 
 This driver enables the use of the PIXART PAW3222 optical sensor with the ZMK framework.

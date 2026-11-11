@@ -9,11 +9,15 @@
 #ifndef ZEPHYR_INCLUDE_INPUT_PAW32XX_H_
 #define ZEPHYR_INCLUDE_INPUT_PAW32XX_H_
 
+#include <stdbool.h>
+#include <stdint.h>
+#include <zephyr/device.h>
+
 /**
  * @brief Set resolution on a paw32xx device
  *
  * @param dev paw32xx device.
- * @param res_cpi CPI resolution, 200 to 3200.
+ * @param res_cpi CPI resolution, 608 to 4826, rounded down to a multiple of 38.
  */
 int paw32xx_set_resolution(const struct device *dev, uint16_t res_cpi);
 
